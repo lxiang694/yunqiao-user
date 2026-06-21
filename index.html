@@ -1,23 +1,5 @@
 <!DOCTYPE html>
 <html lang="zh-Hant"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" /><title>雲橋集運</title>
-<meta name="description" content="雲橋集運：中國到海外一站式集運，深圳智能倉直送台灣、美國、澳洲、加拿大，集運・轉運・倉儲配送全程可追蹤。" />
-<!-- Open Graph：Facebook / LINE 分享預覽。網址目前用 yunqiao-user.vercel.app；日後若換自訂網域，請同步改 og:url / og:image / twitter:image 三處 -->
-<meta property="og:type" content="website" />
-<meta property="og:site_name" content="雲橋集運" />
-<meta property="og:locale" content="zh_TW" />
-<meta property="og:title" content="雲橋集運｜中國到海外，一站式集運更安心" />
-<meta property="og:description" content="深圳智能倉一站式集運，集運・轉運・倉儲配送一次搞定，寄往台灣、美國、澳洲、加拿大。集中打包更省運費，全程可追蹤，第一次集運也安心。" />
-<meta property="og:url" content="https://yunqiao-user.vercel.app" />
-<meta property="og:image" content="https://yunqiao-user.vercel.app/og-preview.jpg" />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
-<meta property="og:image:type" content="image/jpeg" />
-<meta property="og:image:alt" content="雲橋集運 — 中國到海外一站式集運" />
-<!-- Twitter / X -->
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="雲橋集運｜中國到海外，一站式集運更安心" />
-<meta name="twitter:description" content="深圳智能倉直送台灣、美國、澳洲、加拿大，集運・轉運・倉儲配送一站搞定，集中打包更省運費。" />
-<meta name="twitter:image" content="https://yunqiao-user.vercel.app/og-preview.jpg" />
 <style>html,body{margin:0;padding:0;background:#F4F2EC}#root{min-height:100vh}</style>
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
@@ -491,8 +473,10 @@ function CsFab({ onClick, hide }) {
 
 // ── 客服彈窗 / 聯絡方式選單 ─────────────────────────────────────────────────
 function CsPanel({ contact, onClose, flash }) {
-  const [showWxQr, setShowWxQr] = useState(false);
+  const [showWx, setShowWx] = useState(false);
+  const [wxCopied, setWxCopied] = useState(false);
   const c = contact || {};
+
   const copy = async (text, label) => {
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
@@ -509,10 +493,12 @@ function CsPanel({ contact, onClose, flash }) {
     const num = String(c.whatsapp).replace(/[^0-9]/g, "");
     window.open(`https://wa.me/${num}`, "_blank");
   };
-  const handleWechat = () => {
-    if (!c.wechat) return flash?.("微信尚未設定");
-    setShowWxQr(true);
-  };
+
+  // 微信落地頁
+  if (showWx) {
+    return <WechatLandingPage wechat={c.wechat} qrUrl={c.wechat_qr_url} name={c.name} source={c.source} onBack={() => setShowWx(false)} flash={flash} />;
+  }
+
   return (
     <div className="cs-wrap" onClick={onClose}>
       <div className="cs-panel" onClick={(e) => e.stopPropagation()}>
@@ -524,56 +510,160 @@ function CsPanel({ contact, onClose, flash }) {
           <button className="cs-close" onClick={onClose} aria-label="關閉">✕</button>
         </div>
         <div className="cs-body">
-          {!showWxQr ? (
+          <p className="cs-tip">選擇您方便的方式聯絡我們，我們會儘快回覆。</p>
+          <button className="cs-item wechat" onClick={() => { if (!c.wechat) return flash?.("微信尚未設定"); setShowWx(true); }} disabled={!c.wechat}>
+            <span className="cs-ic">💚</span>
+            <div className="cs-item-body">
+              <b>微信</b>
+              <span>{c.wechat || "未設定"}</span>
+            </div>
+            <span className="cs-arrow">›</span>
+          </button>
+          <button className="cs-item line" onClick={openLine} disabled={!c.line_id}>
+            <span className="cs-ic">💬</span>
+            <div className="cs-item-body">
+              <b>LINE</b>
+              <span>{c.line_id ? "點擊加為好友" : "未設定"}</span>
+            </div>
+            <span className="cs-arrow">›</span>
+          </button>
+          <button className="cs-item whatsapp" onClick={openWhatsApp} disabled={!c.whatsapp}>
+            <span className="cs-ic">📱</span>
+            <div className="cs-item-body">
+              <b>WhatsApp</b>
+              <span>{c.whatsapp || "未設定"}</span>
+            </div>
+            <span className="cs-arrow">›</span>
+          </button>
+          <div className="cs-foot-tip">💡 點擊即可跳轉到對應 App 加好友</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 微信加好友落地頁（全屏）──────────────────────────────────────────────────
+function WechatLandingPage({ wechat, qrUrl, name, source, onBack, flash }) {
+  const [copied, setCopied] = useState(false);
+  const [launched, setLaunched] = useState(false);
+
+  // 一鍵複製微信號
+  const copyWechat = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(wechat);
+      else { const ta = document.createElement("textarea"); ta.value = wechat; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch { flash?.("複製失敗，請手動長按複製"); }
+  };
+
+  // 自動喚醒微信
+  // iOS：weixin:// deep link（需使用者已安裝微信）
+  // Android：weixin:// 或 intent://
+  const openWechat = () => {
+    setLaunched(true);
+    // 先複製微信號方便貼上
+    copyWechat();
+    // 嘗試喚醒微信
+    const ua = navigator.userAgent || "";
+    const isAndroid = /Android/i.test(ua);
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    if (isAndroid) {
+      // Android：用 intent scheme
+      window.location.href = `intent://send?text=${encodeURIComponent(wechat)}#Intent;package=com.tencent.mm;scheme=weixin;end`;
+      setTimeout(() => {
+        // fallback：直接開啟 weixin://
+        window.location.href = "weixin://";
+      }, 800);
+    } else if (isIOS) {
+      window.location.href = "weixin://";
+    } else {
+      window.location.href = "weixin://";
+    }
+    setTimeout(() => setLaunched(false), 3000);
+  };
+
+  const subtitle = source === "salesperson" && name ? `專屬顧問 · ${name}` : "雲橋集運 客服";
+
+  return (
+    <div className="wx-landing">
+      {/* 頂部導覽 */}
+      <div className="wx-nav">
+        <button className="wx-back" onClick={onBack} aria-label="返回">
+          <span>‹</span> 返回
+        </button>
+        <div className="wx-nav-title">微信加好友</div>
+        <div style={{width:60}} />
+      </div>
+
+      {/* 主體 */}
+      <div className="wx-body">
+        {/* 品牌標識 */}
+        <div className="wx-brand">
+          <div className="wx-avatar">💚</div>
+          <div className="wx-brand-name">{subtitle}</div>
+          <div className="wx-brand-tip">添加微信，獲得一對一集運服務</div>
+        </div>
+
+        {/* 二維碼區 */}
+        <div className="wx-qr-card">
+          {qrUrl ? (
             <>
-              <p className="cs-tip">選擇您方便的方式聯絡我們，我們會儘快回覆。</p>
-              <button className="cs-item wechat" onClick={handleWechat} disabled={!c.wechat}>
-                <span className="cs-ic">💚</span>
-                <div className="cs-item-body">
-                  <b>微信</b>
-                  <span>{c.wechat || "未設定"}</span>
-                </div>
-                <span className="cs-arrow">›</span>
-              </button>
-              <button className="cs-item line" onClick={openLine} disabled={!c.line_id}>
-                <span className="cs-ic">💬</span>
-                <div className="cs-item-body">
-                  <b>LINE</b>
-                  <span>{c.line_id ? "點擊加為好友" : "未設定"}</span>
-                </div>
-                <span className="cs-arrow">›</span>
-              </button>
-              <button className="cs-item whatsapp" onClick={openWhatsApp} disabled={!c.whatsapp}>
-                <span className="cs-ic">📱</span>
-                <div className="cs-item-body">
-                  <b>WhatsApp</b>
-                  <span>{c.whatsapp || "未設定"}</span>
-                </div>
-                <span className="cs-arrow">›</span>
-              </button>
-              <div className="cs-foot-tip">💡 點擊即可跳轉到對應 App 加好友</div>
+              <img className="wx-qr-img" src={qrUrl} alt="微信二維碼" />
+              <div className="wx-qr-tip">
+                <span className="wx-qr-tip-icon">📷</span>
+                長按或掃描二維碼加好友
+              </div>
             </>
           ) : (
-            <div className="cs-wx-view">
-              <button className="cs-back" onClick={() => setShowWxQr(false)}>← 返回</button>
-              <div className="cs-wx-title">微信加好友</div>
-              {c.wechat_qr_url ? (
-                <img className="cs-wx-qr" src={c.wechat_qr_url} alt="微信二維碼" />
-              ) : (
-                <div className="cs-wx-noqr">
-                  <div className="cs-wx-emoji">💚</div>
-                  <div className="cs-wx-text">請使用微信搜尋以下 ID 加好友</div>
-                </div>
-              )}
-              <div className="cs-wx-id-row">
-                <span className="cs-wx-label">微信號</span>
-                <span className="mono cs-wx-id">{c.wechat}</span>
-                <button className="cs-wx-copy" onClick={() => copy(c.wechat, "微信號")}>複製</button>
-              </div>
-              <div className="cs-wx-help">📱 截圖或長按上方二維碼<br/>或開啟微信 → 搜尋 → 貼上微信號</div>
+            <div className="wx-qr-empty">
+              <div className="wx-qr-empty-icon">💚</div>
+              <div className="wx-qr-empty-text">請使用微信搜尋以下微信號</div>
             </div>
           )}
         </div>
+
+        {/* 微信號 + 複製 */}
+        <div className="wx-id-card">
+          <div className="wx-id-label">微信號</div>
+          <div className="wx-id-row">
+            <span className="wx-id-value mono">{wechat}</span>
+            <button className={"wx-copy-btn" + (copied ? " done" : "")} onClick={copyWechat}>
+              {copied ? "✓ 已複製" : "複製微信號"}
+            </button>
+          </div>
+        </div>
+
+        {/* 三個步驟說明 */}
+        <div className="wx-steps">
+          <div className="wx-step">
+            <div className="wx-step-n">1</div>
+            <div className="wx-step-t">複製微信號</div>
+            <div className="wx-step-s">點上方「複製微信號」按鈕</div>
+          </div>
+          <div className="wx-step-arrow">›</div>
+          <div className="wx-step">
+            <div className="wx-step-n">2</div>
+            <div className="wx-step-t">開啟微信</div>
+            <div className="wx-step-s">點下方按鈕自動跳轉</div>
+          </div>
+          <div className="wx-step-arrow">›</div>
+          <div className="wx-step">
+            <div className="wx-step-n">3</div>
+            <div className="wx-step-t">搜尋加好友</div>
+            <div className="wx-step-s">搜尋 → 貼上微信號</div>
+          </div>
+        </div>
+
+        {/* 主操作按鈕 */}
+        <button className={"wx-launch-btn" + (launched ? " launched" : "")} onClick={openWechat}>
+          {launched ? "✓ 已複製微信號，請在微信中搜尋" : "📱 複製微信號並開啟微信"}
+        </button>
+        {launched && (
+          <div className="wx-launch-tip">
+            若微信未自動開啟，請手動打開微信 → 搜尋 → 貼上微信號
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1068,6 +1158,7 @@ function Consolidate({ ctx }) {
       <div className="sec-title">優惠券</div>
       <div className="coupon-row"><input className="mono" placeholder="輸入優惠券編號" value={coupon} onChange={(e) => setCoupon(e.target.value)} /><button className="btn" onClick={applyCoupon}>套用</button></div>
       {d.couponApplied && <div className="ok">✓ 已套用 {d.couponApplied.label}（{Number(d.couponApplied.discount_twd)} 元）</div>}
+      <div className="hint">原型可試：NEW20 / LINE30 / VIP50</div>
 
       {appUser.credit_balance >= Number(st.credit_per_order) && (
         <label className="switch"><input type="checkbox" checked={!!d.useCredit} onChange={(e) => setDraft((x) => ({ ...x, useCredit: e.target.checked }))} /><span>使用運費額度折抵 {Number(st.credit_per_order)} 元（剩 NT${appUser.credit_balance}）</span></label>
@@ -2064,6 +2155,85 @@ html,body{margin:0;padding:0;overscroll-behavior:none;overflow-x:hidden;max-widt
 .promo.promo-sp{background:linear-gradient(135deg,#EEF2FF,#FFFBEB);
   border:1px dashed #1B3A6B;color:#1B3A6B}
 .promo.promo-sp b{color:#c97800}
+
+/* ---- 微信落地頁（全屏）---- */
+.wx-landing{position:absolute;inset:0;background:#fff;z-index:66;
+  display:flex;flex-direction:column;overflow:hidden;animation:fadeIn .18s ease}
+.wx-nav{display:flex;align-items:center;justify-content:space-between;
+  padding:calc(14px + env(safe-area-inset-top)) 16px 14px;
+  border-bottom:1px solid #F1F3F5;background:#fff;flex-shrink:0}
+.wx-back{display:flex;align-items:center;gap:4px;border:0;background:0;
+  color:#1B3A6B;font-size:15px;font-weight:600;cursor:pointer;
+  font-family:inherit;padding:4px 0;min-width:60px}
+.wx-back span{font-size:20px;line-height:1}
+.wx-nav-title{font-family:'Space Grotesk';font-size:16px;font-weight:700;color:#111827}
+.wx-body{flex:1;overflow-y:auto;padding:20px 20px 32px;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+
+/* 品牌區 */
+.wx-brand{text-align:center;margin-bottom:22px}
+.wx-avatar{width:68px;height:68px;border-radius:22px;
+  background:linear-gradient(135deg,#06AE56,#00C853);
+  display:flex;align-items:center;justify-content:center;
+  font-size:34px;margin:0 auto 12px;
+  box-shadow:0 8px 24px rgba(6,174,86,.30)}
+.wx-brand-name{font-family:'Space Grotesk';font-size:17px;font-weight:700;
+  color:#111827;margin-bottom:4px}
+.wx-brand-tip{font-size:13px;color:#6b7a8e}
+
+/* 二維碼卡片 */
+.wx-qr-card{background:#F7FFF9;border:1.5px solid #C8F0D4;border-radius:20px;
+  padding:20px;text-align:center;margin-bottom:16px}
+.wx-qr-img{width:200px;height:200px;border-radius:14px;
+  object-fit:contain;display:block;margin:0 auto 14px;
+  border:1px solid #E0F5E8;background:#fff;
+  box-shadow:0 4px 16px rgba(6,174,86,.12)}
+.wx-qr-tip{display:flex;align-items:center;justify-content:center;
+  gap:6px;font-size:13px;color:#065F46;font-weight:600}
+.wx-qr-tip-icon{font-size:16px}
+.wx-qr-empty{padding:24px 0}
+.wx-qr-empty-icon{font-size:52px;margin-bottom:10px}
+.wx-qr-empty-text{font-size:13.5px;color:#374151;font-weight:500}
+
+/* 微信號區 */
+.wx-id-card{background:#F5F8FF;border:1.5px solid #C7D4EE;border-radius:14px;
+  padding:14px 16px;margin-bottom:16px}
+.wx-id-label{font-size:11.5px;color:#9AA5B4;font-weight:600;
+  letter-spacing:.4px;text-transform:uppercase;margin-bottom:8px}
+.wx-id-row{display:flex;align-items:center;gap:10px}
+.wx-id-value{flex:1;font-size:18px;font-weight:700;color:#1B3A6B;
+  letter-spacing:.5px;word-break:break-all}
+.wx-copy-btn{flex-shrink:0;background:#1B3A6B;color:#fff;border:0;
+  border-radius:10px;padding:9px 16px;font-size:13.5px;font-weight:700;
+  cursor:pointer;font-family:inherit;white-space:nowrap;
+  transition:all .15s}
+.wx-copy-btn:active{transform:scale(.96)}
+.wx-copy-btn.done{background:#065F46}
+
+/* 步驟說明 */
+.wx-steps{display:flex;align-items:flex-start;justify-content:center;
+  gap:4px;margin-bottom:20px}
+.wx-step{flex:1;text-align:center;max-width:90px}
+.wx-step-n{width:28px;height:28px;border-radius:50%;
+  background:#1B3A6B;color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;margin:0 auto 6px}
+.wx-step-t{font-size:12.5px;font-weight:700;color:#111827;margin-bottom:3px}
+.wx-step-s{font-size:11px;color:#9AA5B4;line-height:1.5}
+.wx-step-arrow{font-size:22px;color:#C4CAD6;margin-top:10px;flex-shrink:0}
+
+/* 主按鈕：喚醒微信 */
+.wx-launch-btn{display:block;width:100%;
+  background:linear-gradient(135deg,#06AE56,#00C853);
+  color:#fff;border:0;border-radius:14px;
+  padding:16px;font-size:16px;font-weight:700;
+  cursor:pointer;font-family:inherit;text-align:center;
+  box-shadow:0 8px 24px rgba(6,174,86,.35);
+  transition:all .15s;margin-bottom:12px}
+.wx-launch-btn:active{transform:scale(.98);opacity:.93}
+.wx-launch-btn.launched{background:linear-gradient(135deg,#065F46,#047857)}
+.wx-launch-tip{text-align:center;font-size:12.5px;color:#6b7a8e;
+  line-height:1.65;padding:0 8px}
 
 /* ---- Boot / Loading ---- */
 .boot{display:flex;align-items:center;justify-content:center;height:100%;
