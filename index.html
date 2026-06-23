@@ -225,6 +225,7 @@ function App() {
   const [mySalesperson, setMySalesperson] = useState(null);   // 用戶綁定的業務員（含 use_custom_rates 等）
   const [contact, setContact] = useState(null);                // 客服聯絡資訊
   const [showCs, setShowCs] = useState(false);                 // 客服彈窗
+  const [pkgFilter, setPkgFilter] = useState("all");           // 我的包裹篩選：all / pending / arrived / abnormal
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
@@ -379,11 +380,11 @@ function App() {
   const goFromNotif = (n) => {
     setShowBell(false);
     if (n.kind === "payment_returned") setScreen("orders");
-    else if (n.kind === "package_arrived") setScreen("packages");
+    else if (n.kind === "package_arrived") { setPkgFilter("arrived"); setScreen("packages"); }
     else if (n.kind === "shipped" || n.kind === "paid") setScreen("orders");
   };
 
-  const ctx = { sess, appUser, settings: st, addresses, packages, orders, setScreen, flash, draft, setDraft, selectedIds, setSelectedIds, reloadUser, reloadAddresses, reloadPackages, reloadOrders, startConsolidate, logout, openImage, openPayment, mySalesperson, contact, openCs: () => setShowCs(true) };
+  const ctx = { sess, appUser, settings: st, addresses, packages, orders, setScreen, flash, draft, setDraft, selectedIds, setSelectedIds, reloadUser, reloadAddresses, reloadPackages, reloadOrders, startConsolidate, logout, openImage, openPayment, mySalesperson, contact, openCs: () => setShowCs(true), pkgFilter, setPkgFilter, goPackages: (f) => { setPkgFilter(f || "all"); setScreen("packages"); } };
 
   function startConsolidate() {
     const arrived = packages.filter((p) => p.status === "arrived");
@@ -435,7 +436,7 @@ function App() {
         {showNav && (
           <div className="tabbar">
             <button className={screen === "home" ? "on" : ""} onClick={() => setScreen("home")}><span>⌂</span>首頁</button>
-            <button className={screen === "packages" ? "on" : ""} onClick={() => setScreen("packages")}><span>📦</span>包裹</button>
+            <button className={screen === "packages" ? "on" : ""} onClick={() => { setPkgFilter("all"); setScreen("packages"); }}><span>📦</span>包裹</button>
             <button className="fab" onClick={startConsolidate}>＋</button>
             <button className={screen === "orders" ? "on" : ""} onClick={() => setScreen("orders")}><span>📍</span>進度</button>
             <button className={screen === "profile" ? "on" : ""} onClick={() => setScreen("profile")}><span>☺</span>我的</button>
@@ -473,10 +474,8 @@ function CsFab({ onClick, hide }) {
 
 // ── 客服彈窗 / 聯絡方式選單 ─────────────────────────────────────────────────
 function CsPanel({ contact, onClose, flash }) {
-  const [showWx, setShowWx] = useState(false);
-  const [wxCopied, setWxCopied] = useState(false);
+  const [showWxQr, setShowWxQr] = useState(false);
   const c = contact || {};
-
   const copy = async (text, label) => {
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
@@ -493,12 +492,10 @@ function CsPanel({ contact, onClose, flash }) {
     const num = String(c.whatsapp).replace(/[^0-9]/g, "");
     window.open(`https://wa.me/${num}`, "_blank");
   };
-
-  // 微信落地頁
-  if (showWx) {
-    return <WechatLandingPage wechat={c.wechat} qrUrl={c.wechat_qr_url} name={c.name} source={c.source} onBack={() => setShowWx(false)} flash={flash} />;
-  }
-
+  const handleWechat = () => {
+    if (!c.wechat) return flash?.("微信尚未設定");
+    setShowWxQr(true);
+  };
   return (
     <div className="cs-wrap" onClick={onClose}>
       <div className="cs-panel" onClick={(e) => e.stopPropagation()}>
@@ -510,160 +507,56 @@ function CsPanel({ contact, onClose, flash }) {
           <button className="cs-close" onClick={onClose} aria-label="關閉">✕</button>
         </div>
         <div className="cs-body">
-          <p className="cs-tip">選擇您方便的方式聯絡我們，我們會儘快回覆。</p>
-          <button className="cs-item wechat" onClick={() => { if (!c.wechat) return flash?.("微信尚未設定"); setShowWx(true); }} disabled={!c.wechat}>
-            <span className="cs-ic">💚</span>
-            <div className="cs-item-body">
-              <b>微信</b>
-              <span>{c.wechat || "未設定"}</span>
-            </div>
-            <span className="cs-arrow">›</span>
-          </button>
-          <button className="cs-item line" onClick={openLine} disabled={!c.line_id}>
-            <span className="cs-ic">💬</span>
-            <div className="cs-item-body">
-              <b>LINE</b>
-              <span>{c.line_id ? "點擊加為好友" : "未設定"}</span>
-            </div>
-            <span className="cs-arrow">›</span>
-          </button>
-          <button className="cs-item whatsapp" onClick={openWhatsApp} disabled={!c.whatsapp}>
-            <span className="cs-ic">📱</span>
-            <div className="cs-item-body">
-              <b>WhatsApp</b>
-              <span>{c.whatsapp || "未設定"}</span>
-            </div>
-            <span className="cs-arrow">›</span>
-          </button>
-          <div className="cs-foot-tip">💡 點擊即可跳轉到對應 App 加好友</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── 微信加好友落地頁（全屏）──────────────────────────────────────────────────
-function WechatLandingPage({ wechat, qrUrl, name, source, onBack, flash }) {
-  const [copied, setCopied] = useState(false);
-  const [launched, setLaunched] = useState(false);
-
-  // 一鍵複製微信號
-  const copyWechat = async () => {
-    try {
-      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(wechat);
-      else { const ta = document.createElement("textarea"); ta.value = wechat; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    } catch { flash?.("複製失敗，請手動長按複製"); }
-  };
-
-  // 自動喚醒微信
-  // iOS：weixin:// deep link（需使用者已安裝微信）
-  // Android：weixin:// 或 intent://
-  const openWechat = () => {
-    setLaunched(true);
-    // 先複製微信號方便貼上
-    copyWechat();
-    // 嘗試喚醒微信
-    const ua = navigator.userAgent || "";
-    const isAndroid = /Android/i.test(ua);
-    const isIOS = /iPhone|iPad|iPod/i.test(ua);
-    if (isAndroid) {
-      // Android：用 intent scheme
-      window.location.href = `intent://send?text=${encodeURIComponent(wechat)}#Intent;package=com.tencent.mm;scheme=weixin;end`;
-      setTimeout(() => {
-        // fallback：直接開啟 weixin://
-        window.location.href = "weixin://";
-      }, 800);
-    } else if (isIOS) {
-      window.location.href = "weixin://";
-    } else {
-      window.location.href = "weixin://";
-    }
-    setTimeout(() => setLaunched(false), 3000);
-  };
-
-  const subtitle = source === "salesperson" && name ? `專屬顧問 · ${name}` : "雲橋集運 客服";
-
-  return (
-    <div className="wx-landing">
-      {/* 頂部導覽 */}
-      <div className="wx-nav">
-        <button className="wx-back" onClick={onBack} aria-label="返回">
-          <span>‹</span> 返回
-        </button>
-        <div className="wx-nav-title">微信加好友</div>
-        <div style={{width:60}} />
-      </div>
-
-      {/* 主體 */}
-      <div className="wx-body">
-        {/* 品牌標識 */}
-        <div className="wx-brand">
-          <div className="wx-avatar">💚</div>
-          <div className="wx-brand-name">{subtitle}</div>
-          <div className="wx-brand-tip">添加微信，獲得一對一集運服務</div>
-        </div>
-
-        {/* 二維碼區 */}
-        <div className="wx-qr-card">
-          {qrUrl ? (
+          {!showWxQr ? (
             <>
-              <img className="wx-qr-img" src={qrUrl} alt="微信二維碼" />
-              <div className="wx-qr-tip">
-                <span className="wx-qr-tip-icon">📷</span>
-                長按或掃描二維碼加好友
-              </div>
+              <p className="cs-tip">選擇您方便的方式聯絡我們，我們會儘快回覆。</p>
+              <button className="cs-item wechat" onClick={handleWechat} disabled={!c.wechat}>
+                <span className="cs-ic">💚</span>
+                <div className="cs-item-body">
+                  <b>微信</b>
+                  <span>{c.wechat || "未設定"}</span>
+                </div>
+                <span className="cs-arrow">›</span>
+              </button>
+              <button className="cs-item line" onClick={openLine} disabled={!c.line_id}>
+                <span className="cs-ic">💬</span>
+                <div className="cs-item-body">
+                  <b>LINE</b>
+                  <span>{c.line_id ? "點擊加為好友" : "未設定"}</span>
+                </div>
+                <span className="cs-arrow">›</span>
+              </button>
+              <button className="cs-item whatsapp" onClick={openWhatsApp} disabled={!c.whatsapp}>
+                <span className="cs-ic">📱</span>
+                <div className="cs-item-body">
+                  <b>WhatsApp</b>
+                  <span>{c.whatsapp || "未設定"}</span>
+                </div>
+                <span className="cs-arrow">›</span>
+              </button>
+              <div className="cs-foot-tip">💡 點擊即可跳轉到對應 App 加好友</div>
             </>
           ) : (
-            <div className="wx-qr-empty">
-              <div className="wx-qr-empty-icon">💚</div>
-              <div className="wx-qr-empty-text">請使用微信搜尋以下微信號</div>
+            <div className="cs-wx-view">
+              <button className="cs-back" onClick={() => setShowWxQr(false)}>← 返回</button>
+              <div className="cs-wx-title">微信加好友</div>
+              {c.wechat_qr_url ? (
+                <img className="cs-wx-qr" src={c.wechat_qr_url} alt="微信二維碼" />
+              ) : (
+                <div className="cs-wx-noqr">
+                  <div className="cs-wx-emoji">💚</div>
+                  <div className="cs-wx-text">請使用微信搜尋以下 ID 加好友</div>
+                </div>
+              )}
+              <div className="cs-wx-id-row">
+                <span className="cs-wx-label">微信號</span>
+                <span className="mono cs-wx-id">{c.wechat}</span>
+                <button className="cs-wx-copy" onClick={() => copy(c.wechat, "微信號")}>複製</button>
+              </div>
+              <div className="cs-wx-help">📱 截圖或長按上方二維碼<br/>或開啟微信 → 搜尋 → 貼上微信號</div>
             </div>
           )}
         </div>
-
-        {/* 微信號 + 複製 */}
-        <div className="wx-id-card">
-          <div className="wx-id-label">微信號</div>
-          <div className="wx-id-row">
-            <span className="wx-id-value mono">{wechat}</span>
-            <button className={"wx-copy-btn" + (copied ? " done" : "")} onClick={copyWechat}>
-              {copied ? "✓ 已複製" : "複製微信號"}
-            </button>
-          </div>
-        </div>
-
-        {/* 三個步驟說明 */}
-        <div className="wx-steps">
-          <div className="wx-step">
-            <div className="wx-step-n">1</div>
-            <div className="wx-step-t">複製微信號</div>
-            <div className="wx-step-s">點上方「複製微信號」按鈕</div>
-          </div>
-          <div className="wx-step-arrow">›</div>
-          <div className="wx-step">
-            <div className="wx-step-n">2</div>
-            <div className="wx-step-t">開啟微信</div>
-            <div className="wx-step-s">點下方按鈕自動跳轉</div>
-          </div>
-          <div className="wx-step-arrow">›</div>
-          <div className="wx-step">
-            <div className="wx-step-n">3</div>
-            <div className="wx-step-t">搜尋加好友</div>
-            <div className="wx-step-s">搜尋 → 貼上微信號</div>
-          </div>
-        </div>
-
-        {/* 主操作按鈕 */}
-        <button className={"wx-launch-btn" + (launched ? " launched" : "")} onClick={openWechat}>
-          {launched ? "✓ 已複製微信號，請在微信中搜尋" : "📱 複製微信號並開啟微信"}
-        </button>
-        {launched && (
-          <div className="wx-launch-tip">
-            若微信未自動開啟，請手動打開微信 → 搜尋 → 貼上微信號
-          </div>
-        )}
       </div>
     </div>
   );
@@ -865,7 +758,7 @@ function WarehouseCard({ u, st, flash }) {
 }
 
 function Home({ ctx }) {
-  const { appUser: u, settings: st, packages, setScreen, startConsolidate, flash } = ctx;
+  const { appUser: u, settings: st, packages, setScreen, startConsolidate, flash, goPackages } = ctx;
   const pending = packages.filter((p) => p.status === "pending");
   const arrived = packages.filter((p) => p.status === "arrived");
   return (
@@ -876,15 +769,15 @@ function Home({ ctx }) {
       <button className="calc-card" onClick={() => setScreen("estimator")}><div className="calc-ic">🧮</div><div className="calc-txt"><b>運費試算</b><span>先估價，再下單，金額透明</span></div><div className="calc-arrow">›</div></button>
       <div className="quick">
         <button onClick={() => setScreen("add")}><span className="qi">＋</span>錄入包裹</button>
-        <button onClick={() => setScreen("packages")}><span className="qi">📦</span>我的包裹</button>
+        <button onClick={() => goPackages("all")}><span className="qi">📦</span>我的包裹</button>
         <button onClick={startConsolidate}><span className="qi">🚀</span>集運出貨</button>
         <button onClick={() => setScreen("orders")}><span className="qi">📍</span>進度追蹤</button>
       </div>
       <div className="sec-title">倉庫狀態</div>
       <div className="stat-grid">
-        <div className="stat"><b>{pending.length}</b><span>待到倉</span></div>
-        <div className="stat sea"><b>{arrived.length}</b><span>已到倉</span></div>
-        <div className="stat alert"><b>{packages.filter(p => p.is_abnormal).length}</b><span>異常包裹</span></div>
+        <button type="button" className="stat tap" onClick={() => goPackages("pending")}><b>{pending.length}</b><span>待到倉 ›</span></button>
+        <button type="button" className="stat sea tap" onClick={() => goPackages("arrived")}><b>{arrived.length}</b><span>已到倉 ›</span></button>
+        <button type="button" className="stat alert tap" onClick={() => goPackages("abnormal")}><b>{packages.filter(p => p.is_abnormal).length}</b><span>異常包裹 ›</span></button>
       </div>
       {arrived.length > 0 && (<><div className="sec-title">已到倉，可集運 <button className="link" onClick={startConsolidate}>去出貨 →</button></div>{arrived.map((p) => <ParcelTag key={p.id} p={p} openImage={ctx.openImage} />)}</>)}
     </div>
@@ -923,7 +816,7 @@ function ShipOpts({ type, setType, over, st }) {
 }
 
 function AddPackage({ ctx }) {
-  const { sess, appUser, setScreen, flash, reloadPackages } = ctx;
+  const { sess, appUser, setScreen, flash, reloadPackages, goPackages } = ctx;
   const [rows, setRows] = useState([{ k: Math.random(), product: "", tracking: "" }]);
   const [busy, setBusy] = useState(false);
   const upd = (k, key, v) => setRows((r) => r.map((x) => x.k === k ? { ...x, [key]: v } : x));
@@ -933,7 +826,7 @@ function AddPackage({ ctx }) {
     setBusy(true);
     try {
       await api("packages", { token: sess.token, method: "POST", prefer: "return=minimal", body: valid.map((r) => ({ user_id: appUser.id, product_name: r.product, tracking_no: r.tracking, status: "pending" })) });
-      await reloadPackages(); flash(`已錄入 ${valid.length} 筆包裹`); setScreen("packages");
+      await reloadPackages(); flash(`已錄入 ${valid.length} 筆包裹`); goPackages("pending");
     } catch (e) { flash(e.message); }
     setBusy(false);
   };
@@ -970,8 +863,20 @@ const CARRIER_OPTIONS = [
 ];
 
 function Packages({ ctx }) {
-  const { sess, packages, setScreen, flash, reloadPackages } = ctx;
+  const { sess, packages, setScreen, flash, reloadPackages, pkgFilter, setPkgFilter } = ctx;
   const [busy, setBusy] = useState(false);
+  const filter = pkgFilter || "all";
+  const matchFilter = (p) => filter === "all" ? true
+    : filter === "abnormal" ? !!p.is_abnormal
+    : p.status === filter;
+  const counts = {
+    all: packages.length,
+    pending: packages.filter(p => p.status === "pending").length,
+    arrived: packages.filter(p => p.status === "arrived").length,
+    abnormal: packages.filter(p => p.is_abnormal).length,
+  };
+  const TABS = [["all","全部"],["pending","待到倉"],["arrived","已到倉"],["abnormal","異常"]];
+  const visible = packages.filter(matchFilter);
   // 每個包裹獨立的查詢狀態：key = package.id
   const [trackMap, setTrackMap] = useState({});
   const [carrierMap, setCarrierMap] = useState({});
@@ -992,8 +897,23 @@ function Packages({ ctx }) {
   return (
     <div className="pad">
       <BackTitle title="我的包裹" setScreen={setScreen} />
+      <div className="pkg-tabs">
+        {TABS.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={"pkg-tab" + (filter === key ? " on" : "") + (key === "abnormal" && counts.abnormal > 0 ? " alert" : "")}
+            onClick={() => setPkgFilter(key)}
+          >
+            {label}<i>{counts[key]}</i>
+          </button>
+        ))}
+      </div>
       {packages.length === 0 && <div className="empty big">還沒有包裹。<br />到「錄入包裹」加入第一筆吧。</div>}
-      {packages.map((p) => {
+      {packages.length > 0 && visible.length === 0 && (
+        <div className="empty big">目前沒有「{(TABS.find(t => t[0] === filter) || [,"符合"])[1]}」的包裹。</div>
+      )}
+      {visible.map((p) => {
         const ts = trackMap[p.id];
         const isOpen = openMap[p.id];
         const carrier = carrierMap[p.id] || "";
@@ -1701,9 +1621,26 @@ html,body{margin:0;padding:0;overscroll-behavior:none;overflow-x:hidden;max-widt
 .stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-bottom:6px}
 .stat{background:#fff;border:1px solid #EAECF0;border-radius:14px;padding:14px 6px;
   text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.stat.tap{font:inherit;width:100%;display:block;cursor:pointer;transition:transform .08s,box-shadow .15s,border-color .15s}
+.stat.tap:hover{border-color:#cfd6e0;box-shadow:0 3px 10px rgba(0,0,0,.08)}
+.stat.tap:active{transform:scale(.96)}
 .stat b{display:block;font-family:'Space Grotesk';font-size:26px;font-weight:700;color:#111827;line-height:1}
 .stat span{font-size:11.5px;color:#6b7a8e;margin-top:3px;display:block}
 .stat.sea b{color:#1B3A6B}.stat.alert b{color:#E03E3E}
+
+/* ---- 我的包裹：狀態篩選分頁 ---- */
+.pkg-tabs{display:flex;gap:8px;margin-bottom:14px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.pkg-tabs::-webkit-scrollbar{display:none}
+.pkg-tab{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font:inherit;cursor:pointer;
+  background:#fff;border:1px solid #EAECF0;border-radius:999px;padding:7px 14px;color:#475569;
+  font-size:13.5px;font-weight:600;transition:background .15s,color .15s,border-color .15s}
+.pkg-tab i{font-style:normal;font-family:'Space Grotesk';font-size:12px;font-weight:700;min-width:20px;
+  text-align:center;background:#EEF1F5;color:#64748b;border-radius:999px;padding:1px 7px;line-height:1.5}
+.pkg-tab.on{background:#1B3A6B;border-color:#1B3A6B;color:#fff}
+.pkg-tab.on i{background:rgba(255,255,255,.22);color:#fff}
+.pkg-tab.alert i{background:#FDE3E3;color:#E03E3E}
+.pkg-tab.on.alert{background:#E03E3E;border-color:#E03E3E}
+.pkg-tab.on.alert i{background:rgba(255,255,255,.25);color:#fff}
 
 /* ---- 倉庫地址卡（手風琴） ---- */
 .wh-card{background:#fff;border:1px solid #EAECF0;border-radius:16px;margin-bottom:12px;
@@ -2155,85 +2092,6 @@ html,body{margin:0;padding:0;overscroll-behavior:none;overflow-x:hidden;max-widt
 .promo.promo-sp{background:linear-gradient(135deg,#EEF2FF,#FFFBEB);
   border:1px dashed #1B3A6B;color:#1B3A6B}
 .promo.promo-sp b{color:#c97800}
-
-/* ---- 微信落地頁（全屏）---- */
-.wx-landing{position:absolute;inset:0;background:#fff;z-index:66;
-  display:flex;flex-direction:column;overflow:hidden;animation:fadeIn .18s ease}
-.wx-nav{display:flex;align-items:center;justify-content:space-between;
-  padding:calc(14px + env(safe-area-inset-top)) 16px 14px;
-  border-bottom:1px solid #F1F3F5;background:#fff;flex-shrink:0}
-.wx-back{display:flex;align-items:center;gap:4px;border:0;background:0;
-  color:#1B3A6B;font-size:15px;font-weight:600;cursor:pointer;
-  font-family:inherit;padding:4px 0;min-width:60px}
-.wx-back span{font-size:20px;line-height:1}
-.wx-nav-title{font-family:'Space Grotesk';font-size:16px;font-weight:700;color:#111827}
-.wx-body{flex:1;overflow-y:auto;padding:20px 20px 32px;
-  -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
-
-/* 品牌區 */
-.wx-brand{text-align:center;margin-bottom:22px}
-.wx-avatar{width:68px;height:68px;border-radius:22px;
-  background:linear-gradient(135deg,#06AE56,#00C853);
-  display:flex;align-items:center;justify-content:center;
-  font-size:34px;margin:0 auto 12px;
-  box-shadow:0 8px 24px rgba(6,174,86,.30)}
-.wx-brand-name{font-family:'Space Grotesk';font-size:17px;font-weight:700;
-  color:#111827;margin-bottom:4px}
-.wx-brand-tip{font-size:13px;color:#6b7a8e}
-
-/* 二維碼卡片 */
-.wx-qr-card{background:#F7FFF9;border:1.5px solid #C8F0D4;border-radius:20px;
-  padding:20px;text-align:center;margin-bottom:16px}
-.wx-qr-img{width:200px;height:200px;border-radius:14px;
-  object-fit:contain;display:block;margin:0 auto 14px;
-  border:1px solid #E0F5E8;background:#fff;
-  box-shadow:0 4px 16px rgba(6,174,86,.12)}
-.wx-qr-tip{display:flex;align-items:center;justify-content:center;
-  gap:6px;font-size:13px;color:#065F46;font-weight:600}
-.wx-qr-tip-icon{font-size:16px}
-.wx-qr-empty{padding:24px 0}
-.wx-qr-empty-icon{font-size:52px;margin-bottom:10px}
-.wx-qr-empty-text{font-size:13.5px;color:#374151;font-weight:500}
-
-/* 微信號區 */
-.wx-id-card{background:#F5F8FF;border:1.5px solid #C7D4EE;border-radius:14px;
-  padding:14px 16px;margin-bottom:16px}
-.wx-id-label{font-size:11.5px;color:#9AA5B4;font-weight:600;
-  letter-spacing:.4px;text-transform:uppercase;margin-bottom:8px}
-.wx-id-row{display:flex;align-items:center;gap:10px}
-.wx-id-value{flex:1;font-size:18px;font-weight:700;color:#1B3A6B;
-  letter-spacing:.5px;word-break:break-all}
-.wx-copy-btn{flex-shrink:0;background:#1B3A6B;color:#fff;border:0;
-  border-radius:10px;padding:9px 16px;font-size:13.5px;font-weight:700;
-  cursor:pointer;font-family:inherit;white-space:nowrap;
-  transition:all .15s}
-.wx-copy-btn:active{transform:scale(.96)}
-.wx-copy-btn.done{background:#065F46}
-
-/* 步驟說明 */
-.wx-steps{display:flex;align-items:flex-start;justify-content:center;
-  gap:4px;margin-bottom:20px}
-.wx-step{flex:1;text-align:center;max-width:90px}
-.wx-step-n{width:28px;height:28px;border-radius:50%;
-  background:#1B3A6B;color:#fff;
-  display:flex;align-items:center;justify-content:center;
-  font-size:13px;font-weight:700;margin:0 auto 6px}
-.wx-step-t{font-size:12.5px;font-weight:700;color:#111827;margin-bottom:3px}
-.wx-step-s{font-size:11px;color:#9AA5B4;line-height:1.5}
-.wx-step-arrow{font-size:22px;color:#C4CAD6;margin-top:10px;flex-shrink:0}
-
-/* 主按鈕：喚醒微信 */
-.wx-launch-btn{display:block;width:100%;
-  background:linear-gradient(135deg,#06AE56,#00C853);
-  color:#fff;border:0;border-radius:14px;
-  padding:16px;font-size:16px;font-weight:700;
-  cursor:pointer;font-family:inherit;text-align:center;
-  box-shadow:0 8px 24px rgba(6,174,86,.35);
-  transition:all .15s;margin-bottom:12px}
-.wx-launch-btn:active{transform:scale(.98);opacity:.93}
-.wx-launch-btn.launched{background:linear-gradient(135deg,#065F46,#047857)}
-.wx-launch-tip{text-align:center;font-size:12.5px;color:#6b7a8e;
-  line-height:1.65;padding:0 8px}
 
 /* ---- Boot / Loading ---- */
 .boot{display:flex;align-items:center;justify-content:center;height:100%;
